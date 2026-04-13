@@ -108,6 +108,7 @@ export const translations = {
     minutes: "Minutes",
     seconds: "Seconds",
     academicSchedule: "Academic Schedule",
+    continueAsGuest: "Continue as Guest",
   },
   BN: {
     welcome: "স্বাগতম",
@@ -217,6 +218,7 @@ export const translations = {
     minutes: "মিনিট",
     seconds: "সেকেন্ড",
     academicSchedule: "একাডেমিক সময়সূচী",
+    continueAsGuest: "অতিথি হিসেবে চালিয়ে যান",
   }
 };
 

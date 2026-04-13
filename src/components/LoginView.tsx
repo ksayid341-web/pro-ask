@@ -72,6 +72,19 @@ export default function LoginView({ onLogin, isDarkMode, toggleDarkMode, languag
     }
   };
 
+  const handleGuestLogin = () => {
+    setError("");
+    setStep("loading");
+    const guestUser = {
+      uid: "guest_" + Math.random().toString(36).substring(2, 11),
+      displayName: "Guest User",
+      email: "guest@tnhs.elite",
+      photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Math.random()}`
+    };
+    setGoogleUser(guestUser as any);
+    setTimeout(() => setStep("portal"), 1000);
+  };
+
   const handleRoleSelect = (selectedRole: UserRole) => {
     setRole(selectedRole);
     setStep("details");
@@ -203,6 +216,20 @@ export default function LoginView({ onLogin, isDarkMode, toggleDarkMode, languag
               >
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
                 {t.signInWithGoogle}
+              </button>
+
+              <div className="relative flex items-center gap-4 py-2">
+                <div className="flex-1 h-px bg-emerald-900/10" />
+                <span className="text-[10px] font-black text-emerald-900/30 uppercase tracking-widest">OR</span>
+                <div className="flex-1 h-px bg-emerald-900/10" />
+              </div>
+
+              <button 
+                onClick={handleGuestLogin}
+                className="w-full py-4 rounded-2xl bg-emerald-50/50 border border-emerald-500/10 flex items-center justify-center gap-3 text-emerald-700 font-bold hover:bg-emerald-100/50 transition-all group"
+              >
+                <User className="w-5 h-5 text-emerald-600" />
+                {t.continueAsGuest}
               </button>
 
               {error && (
