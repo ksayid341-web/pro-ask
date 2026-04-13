@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Teacher' ||
+         (request.auth.token.email == "ksayid341@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'role']) &&
+             data.uid is string &&
+             data.name is string && data.name.size() < 100 &&
+             data.email is string &&
+             data.role in ['Student', 'Teacher'];
+    }
+
+    function isValidExamCharge(data) {
+      return data.keys().hasAll(['entries']) &&
+             data.entries is list &&
+             data.entries.size() <= 200; // Limit entries to prevent DoS
+    }
+
+    function isValidResult(data) {
+      return data.keys().hasAll(['entries']) &&
+             data.entries is list &&
+             data.entries.size() <= 200;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // PII Protection: Only owner or admin can read full profile
+      allow read: if isOwner(userId) || isAdmin();
+      // Public profile info (if needed) should be in a separate collection
+      // For this app, we allow reading others for the teacher list, but this is a risk.
+      // Let's restrict to authenticated users for now, but ideally split PII.
+      allow list: if isAuthenticated(); 
+      
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      request.resource.data.role == resource.data.role; // Prevent self-role-change
+      allow delete: if isAdmin();
+    }
+
+    match /gallery/{imageId} {
+      allow read: if isAuthenticated();
+      allow create, delete: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /notices/{noticeId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /homework/{homeworkId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /attendance/{classId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /suggestions/{suggestionId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /routines/{classId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /results/{resultId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidResult(request.resource.data);
+    }
+
+    match /exam_charges/{chargeId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidExamCharge(request.resource.data);
+    }
+
+    match /class_notices/{noticeId} {
+      allow read: if isAuthenticated();
+      allow create, delete: if isAdmin();
+    }
+  }
+}

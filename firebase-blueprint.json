@@ -1,0 +1,208 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["Student", "Teacher"] },
+        "className": { "type": "string" },
+        "section": { "type": "string" },
+        "rollId": { "type": "string" },
+        "designation": { "type": "string" },
+        "phoneNumber": { "type": "string" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "GalleryImage": {
+      "title": "Gallery Image",
+      "description": "Images uploaded to the school gallery",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "caption": { "type": "string" },
+        "uploadedBy": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "url", "uploadedBy", "timestamp"]
+    },
+    "AppSettings": {
+      "title": "App Settings",
+      "description": "Global application settings like exam countdown",
+      "type": "object",
+      "properties": {
+        "examTargetDate": { "type": "string" },
+        "schoolStatus": { "type": "string" },
+        "upcomingEventTitle": { "type": "string" },
+        "upcomingEventDescription": { "type": "string" },
+        "aboutText": { "type": "string" },
+        "heroBannerUrl": { "type": "string" }
+      }
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "School announcement",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["Important", "General"] },
+        "date": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "title", "content", "type", "date", "timestamp"]
+    },
+    "Homework": {
+      "title": "Homework",
+      "description": "Class homework task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "classId": { "type": "string" },
+        "task": { "type": "string" },
+        "date": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "classId", "task", "date", "timestamp"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Daily attendance percentage for a class",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "percentage": { "type": "number" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["classId", "percentage", "timestamp"]
+    },
+    "Suggestion": {
+      "title": "Suggestion",
+      "description": "Book or exam suggestion",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bookKey": { "type": "string" },
+        "text": { "type": "string" },
+        "date": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "bookKey", "text", "date", "timestamp"]
+    },
+    "Routine": {
+      "title": "Routine",
+      "description": "Class routine",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "data": { "type": "object" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["classId", "data", "timestamp"]
+    },
+    "Result": {
+      "title": "Result",
+      "description": "Student exam results spreadsheet",
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "roll": { "type": "string" },
+              "name": { "type": "string" },
+              "section": { "type": "string" },
+              "totalMarks": { "type": "string" },
+              "position": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["entries"]
+    },
+    "ExamCharge": {
+      "title": "Exam Charge",
+      "description": "Financial charges for students for specific exams",
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "roll": { "type": "string" },
+              "name": { "type": "string" },
+              "section": { "type": "string" },
+              "amount": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["entries"]
+    },
+    "ClassNotice": {
+      "title": "Class Notice",
+      "description": "Internal announcement for a specific class",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["classId", "text", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/gallery/{imageId}": {
+      "schema": "GalleryImage",
+      "description": "School gallery images"
+    },
+    "/settings/global": {
+      "schema": "AppSettings",
+      "description": "Global settings"
+    },
+    "/notices/{noticeId}": {
+      "schema": "Notice",
+      "description": "School announcements"
+    },
+    "/homework/{homeworkId}": {
+      "schema": "Homework",
+      "description": "Class homework"
+    },
+    "/attendance/{classId}": {
+      "schema": "Attendance",
+      "description": "Class attendance"
+    },
+    "/suggestions/{suggestionId}": {
+      "schema": "Suggestion",
+      "description": "Book suggestions"
+    },
+    "/routines/{classId}": {
+      "schema": "Routine",
+      "description": "Class routines"
+    },
+    "/results/{resultId}": {
+      "schema": "Result",
+      "description": "Student results"
+    },
+    "/exam_charges/{chargeId}": {
+      "schema": "ExamCharge",
+      "description": "Exam charges for classes"
+    },
+    "/class_notices/{noticeId}": {
+      "schema": "ClassNotice",
+      "description": "Class-specific notices"
+    }
+  }
+}
