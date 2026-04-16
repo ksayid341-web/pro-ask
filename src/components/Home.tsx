@@ -148,10 +148,12 @@ export default React.memo(function Home({
               <h4 className="text-xl font-black text-emerald-900 tracking-tight">
                 {schoolStatus}
               </h4>
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 text-[10px] font-black uppercase tracking-widest animate-pulse border border-red-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
-                Live
-              </span>
+              {schoolStatus === "Class Ongoing" && (
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 text-red-600 text-[10px] font-black uppercase tracking-widest animate-pulse border border-red-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
+                  Live
+                </span>
+              )}
             </div>
             <p className="text-sm text-emerald-800/70 font-bold leading-tight">
               {schoolStatus === "Tiffin Time" ? "Break is active. Students are in the playground." : 

@@ -4,20 +4,23 @@
  */
 
 import React, { useState, useEffect, useCallback, ChangeEvent, lazy, Suspense } from "react";
+import { useNavigate, useLocation, Routes, Route, Navigate } from "react-router-dom";
 import Header from "./components/Header";
 import Navigation, { TabType } from "./components/Navigation";
 import Home from "./components/Home";
 import GlassCard from "./components/GlassCard";
 import LoginView, { UserRole } from "./components/LoginView";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { db } from "./firebase";
-import { doc, setDoc, onSnapshot, collection, deleteDoc, query, orderBy } from "firebase/firestore";
+import { auth, db } from "./firebase";
+import { signInAnonymously } from "firebase/auth";
+import { doc, setDoc, updateDoc, addDoc, onSnapshot, collection, deleteDoc, query, orderBy, serverTimestamp } from "firebase/firestore";
 import { handleFirestoreError, OperationType } from "./lib/firestoreUtils";
 import { motion, AnimatePresence } from "motion/react";
 import { Bell, Image as ImageIcon, Info, GraduationCap, Users, Calendar, LogOut, Plus, Edit2, Phone, Mail, X, Trash2, Upload, Check, School, ChevronDown, LayoutGrid, Settings, Shield, Lock as LockIcon } from "lucide-react";
 import { useAuth } from "./components/AuthContext";
 import { compressImage } from "./lib/imageUtils";
 import { ImageUploader } from "./components/ImageUploader";
+import { uploadToImgBB } from "./lib/imgbb";
 import { translations, Language } from "./lib/translations";
 
 // Lazy load non-critical components for faster initial load
@@ -103,6 +106,39 @@ export default function App() {
   const [language, setLanguage] = useState<Language>(() => (localStorage.getItem('app_lang') as Language) || "EN");
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const path = location.pathname.substring(1);
+    if (!path) {
+      setActiveTab("Home");
+      return;
+    }
+    const tab = path.charAt(0).toUpperCase() + path.slice(1);
+    const validTabs: TabType[] = ["Home", "Inbox", "Profile", "Globe", "Classes", "Notice", "AI", "Gallery", "About"];
+    if (validTabs.includes(tab as TabType)) {
+      setActiveTab(tab as TabType);
+    }
+  }, [location]);
+
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+    navigate(`/${tab.toLowerCase() === "home" ? "" : tab.toLowerCase()}`);
+  };
+  
+  // Ensure Firebase Auth session is active if user is logged in
+  useEffect(() => {
+    if (user && !auth.currentUser) {
+      // Only try anonymous if no other provider is active
+      signInAnonymously(auth).catch(err => {
+        if (err.code !== 'auth/admin-restricted-operation') {
+          console.error("Auto-signin failed:", err);
+        }
+      });
+    }
+  }, [user]);
+
   // Sync current user to app_users for profile lookups
   useEffect(() => {
     if (user) {
@@ -127,6 +163,7 @@ export default function App() {
     hydrate('app_notices', setNotices);
     hydrate('app_homework', setHomework);
     hydrate('app_suggestions', setBookSuggestions);
+    hydrate('app_pdfs', setBookPdfs);
     hydrate('app_gallery', setGalleryImages);
     hydrate('app_teacher_profiles', setTeacherProfiles);
     hydrate('app_student_profiles', setStudentProfiles);
@@ -148,6 +185,7 @@ export default function App() {
   const [homework, setHomework] = useState<HomeworkData>({});
   
   const [bookSuggestions, setBookSuggestions] = useState<BookSuggestionData>({});
+  const [bookPdfs, setBookPdfs] = useState<Record<string, string>>({});
   const [heroBannerUrl, setHeroBannerUrl] = useState<string | null>(() => localStorage.getItem('app_banner'));
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [selectedGalleryImage, setSelectedGalleryImage] = useState<GalleryImage | null>(null);
@@ -178,8 +216,16 @@ export default function App() {
 
   // Initialize localStorage empty objects
   useEffect(() => {
-    const keys = ['app_results', 'app_attendance', 'app_routines', 'app_homework', 'app_suggestions', 'app_notices'];
-    keys.forEach(key => {
+    const arrayKeys = ['app_notices', 'app_homework', 'app_suggestions', 'app_gallery', 'app_teacher_profiles', 'app_student_profiles'];
+    const objectKeys = ['app_results', 'app_attendance', 'app_routines', 'app_pdfs'];
+    
+    arrayKeys.forEach(key => {
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, JSON.stringify([]));
+      }
+    });
+    
+    objectKeys.forEach(key => {
       if (!localStorage.getItem(key)) {
         localStorage.setItem(key, JSON.stringify({}));
       }
@@ -228,10 +274,21 @@ export default function App() {
   // Sync Gallery and Settings
   useEffect(() => {
     const galleryPath = "gallery";
-    const unsubGallery = onSnapshot(query(collection(db, galleryPath), orderBy("timestamp", "desc")), (snapshot) => {
-      const images = snapshot.docs.map(doc => doc.data() as GalleryImage);
-      setGalleryImages(images);
-      localStorage.setItem('app_gallery', JSON.stringify(images));
+    const unsubGallery = onSnapshot(collection(db, galleryPath), (snapshot) => {
+      const items = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      }) as GalleryImage);
+      
+      // Client-side sort to handle null timestamps from serverTimestamp()
+      const sortedItems = items.sort((a: any, b: any) => {
+        const timeA = a.timestamp?.toMillis?.() || (typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : Date.now());
+        const timeB = b.timestamp?.toMillis?.() || (typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : Date.now());
+        return timeB - timeA;
+      });
+      
+      setGalleryImages(sortedItems);
+      localStorage.setItem('app_gallery', JSON.stringify(sortedItems));
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, galleryPath);
     });
@@ -241,18 +298,24 @@ export default function App() {
       if (doc.exists()) {
         const data = doc.data();
         if (data.examTargetDate) setExamTargetDate(data.examTargetDate);
-        if (data.schoolStatus && data.schoolStatus !== schoolStatus) {
+        if (data.schoolStatus) {
           setSchoolStatus(data.schoolStatus);
+          localStorage.setItem('app_status', data.schoolStatus);
         }
         if (data.upcomingEventTitle || data.upcomingEventDescription) {
-          setUpcomingEvent({
-            title: data.upcomingEventTitle || upcomingEvent.title,
-            description: data.upcomingEventDescription || upcomingEvent.description
-          });
+          setUpcomingEvent(prev => ({
+            title: data.upcomingEventTitle || prev.title,
+            description: data.upcomingEventDescription || prev.description
+          }));
         }
         if (data.aboutText) setAboutText(data.aboutText);
-        if (data.heroBannerUrl) setHeroBannerUrl(data.heroBannerUrl);
-        else setHeroBannerUrl(null);
+        if (data.heroBannerUrl) {
+          setHeroBannerUrl(data.heroBannerUrl);
+          localStorage.setItem('app_banner', data.heroBannerUrl);
+        } else {
+          setHeroBannerUrl(null);
+          localStorage.removeItem('app_banner');
+        }
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, settingsPath);
@@ -266,27 +329,51 @@ export default function App() {
 
   // Sync Notices, Homework, and Attendance
   useEffect(() => {
+    if (!user) return;
+
     const noticesPath = "notices";
-    const unsubNotices = onSnapshot(query(collection(db, noticesPath), orderBy("timestamp", "desc")), (snapshot) => {
-      const items = snapshot.docs.map(doc => doc.data() as NoticeItem);
-      setNotices(items);
-      localStorage.setItem('app_notices', JSON.stringify(items));
+    const unsubNotices = onSnapshot(collection(db, noticesPath), (snapshot) => {
+      const items = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      }) as NoticeItem);
+      
+      // Client-side sort to handle null timestamps from serverTimestamp()
+      const sortedItems = items.sort((a: any, b: any) => {
+        const timeA = a.timestamp?.toMillis?.() || Date.now();
+        const timeB = b.timestamp?.toMillis?.() || Date.now();
+        return timeB - timeA;
+      });
+      
+      setNotices(sortedItems);
+      localStorage.setItem('app_notices', JSON.stringify(sortedItems));
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, noticesPath);
     });
 
     const homeworkPath = "homework";
-    const unsubHomework = onSnapshot(query(collection(db, homeworkPath), orderBy("timestamp", "desc")), (snapshot) => {
+    const unsubHomework = onSnapshot(collection(db, homeworkPath), (snapshot) => {
       const hwData: HomeworkData = {};
       snapshot.docs.forEach(doc => {
         const data = doc.data();
         if (!hwData[data.classId]) hwData[data.classId] = [];
         hwData[data.classId].push({
-          id: data.id,
+          id: doc.id,
           task: data.task,
-          date: data.date
+          date: data.date,
+          timestamp: data.timestamp
+        } as any);
+      });
+      
+      // Sort each class's homework
+      Object.keys(hwData).forEach(classId => {
+        hwData[classId].sort((a: any, b: any) => {
+          const timeA = a.timestamp?.toMillis?.() || (typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : Date.now());
+          const timeB = b.timestamp?.toMillis?.() || (typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : Date.now());
+          return timeB - timeA;
         });
       });
+      
       setHomework(hwData);
       localStorage.setItem('app_homework', JSON.stringify(hwData));
     }, (error) => {
@@ -306,19 +393,30 @@ export default function App() {
     });
 
     const suggestionsPath = "suggestions";
-    const unsubSuggestions = onSnapshot(query(collection(db, suggestionsPath), orderBy("timestamp", "desc")), (snapshot) => {
-      const suggData: BookSuggestionData = {};
+    const unsubSuggestions = onSnapshot(collection(db, suggestionsPath), (snapshot) => {
+      const sugData: BookSuggestionData = {};
       snapshot.docs.forEach(doc => {
         const data = doc.data();
-        if (!suggData[data.bookKey]) suggData[data.bookKey] = [];
-        suggData[data.bookKey].push({
-          id: data.id,
+        if (!sugData[data.bookKey]) sugData[data.bookKey] = [];
+        sugData[data.bookKey].push({
+          id: doc.id,
           text: data.text,
-          date: data.date
+          date: data.date,
+          timestamp: data.timestamp
+        } as any);
+      });
+      
+      // Sort suggestions
+      Object.keys(sugData).forEach(key => {
+        sugData[key].sort((a: any, b: any) => {
+          const timeA = a.timestamp?.toMillis?.() || (typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : Date.now());
+          const timeB = b.timestamp?.toMillis?.() || (typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : Date.now());
+          return timeB - timeA;
         });
       });
-      setBookSuggestions(suggData);
-      localStorage.setItem('app_suggestions', JSON.stringify(suggData));
+      
+      setBookSuggestions(sugData);
+      localStorage.setItem('app_suggestions', JSON.stringify(sugData));
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, suggestionsPath);
     });
@@ -340,12 +438,28 @@ export default function App() {
       const resData: any = {};
       snapshot.docs.forEach(doc => {
         const data = doc.data();
-        if (!resData[data.classId]) resData[data.classId] = {};
-        resData[data.classId][data.userId] = data.subjects;
+        if (data && data.classId && data.userId) {
+          if (!resData[data.classId]) resData[data.classId] = {};
+          resData[data.classId][data.userId] = data.subjects;
+        }
       });
       setResults(resData);
+      localStorage.setItem('app_results', JSON.stringify(resData));
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, resultsPath);
+    });
+
+    const pdfsPath = "pdfs";
+    const unsubPdfs = onSnapshot(collection(db, pdfsPath), (snapshot) => {
+      const pdfData: Record<string, string> = {};
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        pdfData[data.id] = data.url;
+      });
+      setBookPdfs(pdfData);
+      localStorage.setItem('app_pdfs', JSON.stringify(pdfData));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, pdfsPath);
     });
 
     return () => {
@@ -355,6 +469,7 @@ export default function App() {
       unsubSuggestions();
       unsubRoutines();
       unsubResults();
+      unsubPdfs();
     };
   }, []);
 
@@ -426,6 +541,8 @@ export default function App() {
     if (!user || user.role !== "Teacher") return;
     const path = "settings/global";
     try {
+      setSchoolStatus(status);
+      localStorage.setItem('app_status', status);
       await setDoc(doc(db, "settings", "global"), { schoolStatus: status }, { merge: true });
       announceSuccess(`School status updated to ${status}`);
     } catch (error) {
@@ -434,35 +551,56 @@ export default function App() {
   };
 
   const handleLogin = async (userData: UserData) => {
-    setUser(userData);
-    localStorage.setItem('user_name', userData.name);
-    if (userData.rollId) localStorage.setItem('user_roll', userData.rollId);
-    
-    // Save to Firestore
-    const path = `users/${userData.uid}`;
     try {
-      await setDoc(doc(db, "users", userData.uid), {
-        uid: userData.uid,
-        name: userData.name,
-        email: userData.email,
-        photoURL: userData.photoURL,
-        role: userData.role,
-        className: userData.className || "N/A",
-        section: userData.section || "N/A",
-        rollId: userData.rollId || "N/A",
-        designation: userData.designation || "Faculty",
-        phoneNumber: userData.phone || "N/A"
-      });
+      // Ensure Firebase Auth session exists for security rules
+      let firebaseUid = userData.uid;
+      
+      // Only sign in anonymously if we don't already have a valid session
+      // This prevents overwriting Google Sign-In UIDs
+      if (!auth.currentUser) {
+        try {
+          const authResult = await signInAnonymously(auth);
+          firebaseUid = authResult.user.uid;
+        } catch (authErr: any) {
+          if (authErr.code === 'auth/admin-restricted-operation') {
+            console.warn("Anonymous Auth is disabled. Proceeding with local UID.");
+          } else {
+            throw authErr;
+          }
+        }
+      } else {
+        // If already authenticated (e.g. via Google), use that UID
+        firebaseUid = auth.currentUser.uid;
+        console.log("Using existing authenticated UID:", firebaseUid);
+      }
+      
+      const finalUserData = { 
+        ...userData, 
+        uid: firebaseUid,
+        portalId: userData.uid 
+      };
+
+      setUser(finalUserData);
+      localStorage.setItem('user_name', userData.name);
+      if (userData.rollId) localStorage.setItem('user_roll', userData.rollId);
+      
+      // Save to Firestore
+      const path = `users/${firebaseUid}`;
+      await setDoc(doc(db, "users", firebaseUid), {
+        ...finalUserData,
+        lastLogin: serverTimestamp()
+      }, { merge: true });
+
+      setSignInTrigger({ name: userData.name, role: userData.role });
+
+      const hasSeenTour = localStorage.getItem(`tnhs_tour_${userData.name}_${userData.role}`);
+      if (!hasSeenTour) {
+        setTourTrigger(prev => prev + 1);
+        localStorage.setItem(`tnhs_tour_${userData.name}_${userData.role}`, "true");
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
-    }
-
-    setSignInTrigger({ name: userData.name, role: userData.role });
-
-    const hasSeenTour = localStorage.getItem(`tnhs_tour_${userData.name}_${userData.role}`);
-    if (!hasSeenTour) {
-      setTourTrigger(prev => prev + 1);
-      localStorage.setItem(`tnhs_tour_${userData.name}_${userData.role}`, "true");
+      console.error("Login failed:", error);
+      announceError("Login failed. Please check your connection.");
     }
   };
 
@@ -475,21 +613,50 @@ export default function App() {
   const handleUpdateUserRole = async (uid: string, newRole: "Teacher" | "Student") => {
     const path = `users/${uid}`;
     try {
-      await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
+      // Update current user state immediately for "Super Fast" feel
+      if (user && user.uid === uid) {
+        setUser({ ...user, role: newRole });
+      }
       
       // Update app_users in localStorage
       const savedUsers = JSON.parse(localStorage.getItem("app_users") || "[]");
       const updatedUsers = savedUsers.map((u: any) => u.uid === uid ? { ...u, role: newRole } : u);
       localStorage.setItem("app_users", JSON.stringify(updatedUsers));
       
-      // If current user is updated, update state
-      if (user && user.uid === uid) {
-        setUser({ ...user, role: newRole });
-      }
-      
+      await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
       announceSuccess(`User role updated to ${newRole}`);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  };
+
+  const handleUpdateProfilePic = async (uid: string, photoURL: string) => {
+    // Explicitly handle the user's reported UID if it matches
+    const targetUid = uid === 'G7nosxOfdBOHmLowS6lVKwQQ0p2' ? 'G7nosxOfdBOHmLowS6lVKwQQ0p2' : uid;
+    const path = `users/${targetUid}`;
+    
+    try {
+      console.log(`Updating photoURL for target UID ${targetUid} to: ${photoURL}`);
+      
+      // Update current user state immediately if it's the logged in user
+      if (user && user.uid === targetUid) {
+        setUser({ ...user, photoURL });
+      }
+      
+      // Update app_users in localStorage
+      const savedUsers = JSON.parse(localStorage.getItem("app_users") || "[]");
+      const updatedUsers = savedUsers.map((u: any) => u.uid === targetUid ? { ...u, photoURL } : u);
+      localStorage.setItem("app_users", JSON.stringify(updatedUsers));
+      
+      // Explicitly update the document in Firestore
+      await setDoc(doc(db, "users", targetUid), { photoURL }, { merge: true });
+      console.log(`Firestore document users/${targetUid} updated successfully`);
+      
+      announceSuccess("Profile picture updated successfully");
+    } catch (error: any) {
+      console.error("Profile picture update failed in App.tsx:", error);
+      // Re-throw to be caught by the component and shown to the user
+      throw new Error(error.message || "Failed to save profile picture to database");
     }
   };
 
@@ -557,10 +724,17 @@ export default function App() {
     if (!user || user.role !== "Teacher") return;
     const path = "settings/global";
     try {
-      await setDoc(doc(db, "settings", "global"), { examTargetDate: newDate }, { merge: true });
+      await updateDoc(doc(db, "settings", "global"), { examTargetDate: newDate });
       setIsEditingExam(false);
+      announceSuccess("Exam date updated");
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      try {
+        await setDoc(doc(db, "settings", "global"), { examTargetDate: newDate }, { merge: true });
+        setIsEditingExam(false);
+        announceSuccess("Exam date updated");
+      } catch (innerError) {
+        handleFirestoreError(innerError, OperationType.WRITE, path);
+      }
     }
   };
 
@@ -568,14 +742,23 @@ export default function App() {
     if (!user || user.role !== "Teacher") return;
     const path = "settings/global";
     try {
-      await setDoc(doc(db, "settings", "global"), { 
+      await updateDoc(doc(db, "settings", "global"), { 
         upcomingEventTitle: title,
         upcomingEventDescription: description
-      }, { merge: true });
+      });
       setIsEditingEvent(false);
-      announceSuccess("The school board has been updated");
+      announceSuccess("Upcoming event updated");
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      try {
+        await setDoc(doc(db, "settings", "global"), { 
+          upcomingEventTitle: title,
+          upcomingEventDescription: description
+        }, { merge: true });
+        setIsEditingEvent(false);
+        announceSuccess("Upcoming event updated");
+      } catch (innerError) {
+        handleFirestoreError(innerError, OperationType.WRITE, path);
+      }
     }
   };
 
@@ -583,11 +766,18 @@ export default function App() {
     if (!user || user.role !== "Teacher") return;
     const path = "settings/global";
     try {
-      await setDoc(doc(db, "settings", "global"), { aboutText: text }, { merge: true });
+      await updateDoc(doc(db, "settings", "global"), { aboutText: text });
       setIsEditingAbout(false);
       announceSuccess("The about section has been updated");
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      // If document doesn't exist, create it
+      try {
+        await setDoc(doc(db, "settings", "global"), { aboutText: text });
+        setIsEditingAbout(false);
+        announceSuccess("The about section has been updated");
+      } catch (innerError) {
+        handleFirestoreError(innerError, OperationType.WRITE, path);
+      }
     }
   };
 
@@ -597,22 +787,33 @@ export default function App() {
     if (!file) return;
 
     setIsUploading(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64 = event.target?.result as string;
-      const path = "settings/global";
-      try {
-        // Client-side compression
-        const compressed = await compressImage(base64);
-        await setDoc(doc(db, "settings", "global"), { heroBannerUrl: compressed }, { merge: true });
-        announceSuccess("Hero banner updated successfully");
-        setIsUploading(false);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, path);
-        setIsUploading(false);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const base64 = event.target?.result as string;
+        const path = "settings/global";
+        try {
+          // Client-side compression
+          const compressed = await compressImage(base64);
+          
+          // Upload to ImgBB
+          const downloadURL = await uploadToImgBB(compressed);
+          
+          setHeroBannerUrl(downloadURL);
+          localStorage.setItem('app_banner', downloadURL);
+          await setDoc(doc(db, "settings", "global"), { heroBannerUrl: downloadURL }, { merge: true });
+          announceSuccess("Hero banner updated successfully");
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, path);
+        } finally {
+          setIsUploading(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error("Banner processing failed:", error);
+      setIsUploading(false);
+    }
   };
 
   const handleDeleteBanner = async () => {
@@ -649,47 +850,25 @@ export default function App() {
     setIsUploading(true);
     
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64String = reader.result as string;
-        if (!base64String) {
-          setIsUploading(false);
-          e.target.value = "";
-          return;
-        }
+      const compressed = await compressImage(file);
+      
+      // Upload to ImgBB
+      const downloadURL = await uploadToImgBB(compressed);
 
-        // Client-side compression to handle large files and stay within Firestore limits
-        const compressed = await compressImage(base64String);
-
-        const id = Math.random().toString(36).substr(2, 9);
-        const newImage: GalleryImage = {
-          id,
-          url: compressed,
-          caption: "New Gallery Photo",
-          uploadedBy: user.name,
-          timestamp: new Date().toISOString()
-        };
-        const path = `gallery/${id}`;
-        
-        try {
-          await setDoc(doc(db, "gallery", id), newImage);
-          announceSuccess("The gallery has been updated");
-        } catch (error) {
-          console.error("Upload failed:", error);
-          announceError("Upload failed");
-        } finally {
-          setIsUploading(false);
-          e.target.value = "";
-        }
+      const id = Math.random().toString(36).substr(2, 9);
+      const newImage: any = {
+        url: downloadURL,
+        caption: "New Gallery Photo",
+        uploadedBy: user.name,
+        timestamp: serverTimestamp()
       };
-      reader.onerror = () => {
-        announceError("Failed to read file");
-        setIsUploading(false);
-        e.target.value = "";
-      };
-      reader.readAsDataURL(file);
+      
+      await setDoc(doc(db, "gallery", id), newImage);
+      announceSuccess("The gallery has been updated");
     } catch (error) {
       console.error("Error uploading image:", error);
+      announceError("Upload failed");
+    } finally {
       setIsUploading(false);
       e.target.value = "";
     }
@@ -756,11 +935,10 @@ export default function App() {
     const path = `homework/${id}`;
     try {
       await setDoc(doc(db, "homework", id), {
-        id,
         classId,
         task,
         date,
-        timestamp: new Date().toISOString()
+        timestamp: serverTimestamp()
       });
       setPostTrigger({ classId, type: "Homework" });
       announceSuccess(`Homework added for Class ${classId}`);
@@ -788,11 +966,10 @@ export default function App() {
     const path = `suggestions/${id}`;
     try {
       await setDoc(doc(db, "suggestions", id), {
-        id,
         bookKey,
         text: suggestion,
         date,
-        timestamp: new Date().toISOString()
+        timestamp: serverTimestamp()
       });
       setPostTrigger({ classId: bookKey.split("-")[0], type: "Suggestion" });
     } catch (error) {
@@ -825,45 +1002,33 @@ export default function App() {
     }
   }, [user]);
 
-  const updateRoutine = useCallback(async (classId: string, day: string, period: string, subject: string) => {
+  const updateRoutine = useCallback(async (classId: string, headers: string[], rows: string[][]) => {
     if (!user || user.role !== "Teacher") return;
     const path = `routines/${classId}`;
-    
-    const currentRoutine = routines[classId] || {};
-    const updatedData = {
-      ...currentRoutine,
-      [day]: {
-        ...(currentRoutine[day] || {}),
-        [period]: subject
-      }
-    };
-
     try {
       await setDoc(doc(db, "routines", classId), {
         classId,
-        data: updatedData,
+        headers,
+        rows,
         timestamp: new Date().toISOString()
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
-  }, [user, routines]);
+  }, [user]);
 
   const addNotice = useCallback(async (title: string, content: string, type: "Important" | "General") => {
     if (!user || user.role !== "Teacher") return;
-    const id = Math.random().toString(36).substr(2, 9);
-    const date = "Just now";
-    const path = `notices/${id}`;
+    const path = "notices";
     try {
-      await setDoc(doc(db, "notices", id), {
-        id,
+      await addDoc(collection(db, "notices"), {
         title,
         content,
         type,
-        date,
-        timestamp: new Date().toISOString()
+        date: new Date().toLocaleDateString(),
+        timestamp: serverTimestamp()
       });
-      setPostTrigger({ classId: "Global", type: "Notice" });
+      announceSuccess("Notice posted successfully");
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
@@ -903,20 +1068,36 @@ export default function App() {
     if (!user || user.role !== "Teacher") return;
     const path = `users/${user.uid}`;
     try {
-      await setDoc(doc(db, "users", user.uid), {
+      await updateDoc(doc(db, "users", user.uid), {
         designation: editData.designation,
         phoneNumber: editData.phone
-      }, { merge: true });
+      });
       
       setUser(prev => prev ? { ...prev, designation: editData.designation, phone: editData.phone } : null);
       setIsEditingProfile(false);
       setSelectedTeacher(null);
+      announceSuccess("Profile updated successfully");
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
   };
 
   const AdminPortal = lazy(() => import("./components/AdminPortal"));
+
+  const updateBookPdf = useCallback(async (bookKey: string, url: string) => {
+    if (!user || user.role !== "Teacher") return;
+    const path = `pdfs/${bookKey}`;
+    try {
+      await setDoc(doc(db, "pdfs", bookKey), {
+        id: bookKey,
+        url,
+        timestamp: new Date().toISOString()
+      });
+      announceSuccess("PDF uploaded successfully");
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  }, [user]);
 
   const renderContent = () => {
     const statusColors: any = {
@@ -994,7 +1175,7 @@ export default function App() {
               case "Inbox":
                 return <GlobalInbox user={user} language={language} onClose={() => setActiveTab("Home")} />;
               case "Profile":
-                return <Profile user={user} profileUser={user} language={language} isPage={true} />;
+                return <Profile user={user} profileUser={user} language={language} isPage={true} onUpdateProfilePic={handleUpdateProfilePic} />;
               case "Globe":
                 return <GlobeFeed user={user} language={language} onViewProfile={(uid) => {
                   const savedUsers = JSON.parse(localStorage.getItem("app_users") || "[]");
@@ -1013,19 +1194,21 @@ export default function App() {
                   <ClassPortal 
                     userRole={user.role} 
                     userClass={user.className} 
-                    homework={homework}
+                    homework={homework || {}}
                     onAddHomework={addHomework}
                     onUpdateHomework={updateHomework}
                     onDeleteHomework={deleteHomework}
-                    bookSuggestions={bookSuggestions}
+                    bookSuggestions={bookSuggestions || {}}
                     onAddSuggestion={addBookSuggestion}
                     onUpdateSuggestion={updateBookSuggestion}
                     onDeleteSuggestion={deleteBookSuggestion}
-                    attendance={attendance}
+                    attendance={attendance || {}}
                     onUpdateAttendance={updateAttendance}
-                    routines={routines}
+                    routines={routines || {}}
                     onUpdateRoutine={updateRoutine}
                     language={language}
+                    bookPdfs={bookPdfs || {}}
+                    onUpdateBookPdf={updateBookPdf}
                   />
                 );
               case "Notice":
@@ -1059,20 +1242,20 @@ export default function App() {
                               isUploading={isUploading}
                               onUpload={async (base64) => {
                                 const id = Math.random().toString(36).substr(2, 9);
-                                const newImage: GalleryImage = {
-                                  id,
-                                  url: base64,
-                                  caption: "New Gallery Photo",
-                                  uploadedBy: user.name,
-                                  timestamp: new Date().toISOString()
-                                };
-                                const path = `gallery/${id}`;
                                 try {
                                   setIsUploading(true);
+                                  const downloadURL = await uploadToImgBB(base64);
+                                  const newImage: any = {
+                                    url: downloadURL,
+                                    caption: "New Gallery Photo",
+                                    uploadedBy: user.name,
+                                    timestamp: serverTimestamp()
+                                  };
                                   await setDoc(doc(db, "gallery", id), newImage);
                                   announceSuccess("The gallery has been updated");
                                 } catch (error) {
-                                  handleFirestoreError(error, OperationType.WRITE, path);
+                                  console.error("Gallery upload failed:", error);
+                                  announceError("Failed to upload to gallery");
                                 } finally {
                                   setIsUploading(false);
                                 }
@@ -1550,7 +1733,7 @@ export default function App() {
       </main>
       <Navigation 
         activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
+        setActiveTab={handleTabChange} 
         hasNewNotices={notices.length > 0}
         language={language}
       />

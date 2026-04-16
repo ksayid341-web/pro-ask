@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { UserRole } from "./LoginView";
 import { BookSuggestionData } from "../App";
 
+import { Language, translations } from "../lib/translations";
+
 interface BookLibraryProps {
   classId: string;
   userRole: UserRole;
@@ -13,6 +15,9 @@ interface BookLibraryProps {
   onUpdateSuggestion: (bookKey: string, id: string, newText: string) => void;
   onDeleteSuggestion?: (bookKey: string, id: string) => void;
   onBack: () => void;
+  language: Language;
+  bookPdfs?: Record<string, string>;
+  onUpdateBookPdf?: (bookKey: string, url: string) => void;
 }
 
 const NCTB_BOOKS = [
@@ -28,7 +33,19 @@ const NCTB_BOOKS = [
   { id: "Biology", name: "Biology (জীববিজ্ঞান)", color: "bg-green-500/20", iconColor: "text-green-600" },
 ];
 
-const BookLibrary = memo(({ classId, userRole, suggestions, onAddSuggestion, onUpdateSuggestion, onDeleteSuggestion, onBack }: BookLibraryProps) => {
+const BookLibrary = memo(({ 
+  classId, 
+  userRole, 
+  suggestions, 
+  onAddSuggestion, 
+  onUpdateSuggestion, 
+  onDeleteSuggestion, 
+  onBack,
+  language,
+  bookPdfs = {},
+  onUpdateBookPdf
+}: BookLibraryProps) => {
+  const t = translations[language];
   const [selectedBook, setSelectedBook] = useState<string | null>(null);
   const [showInputBar, setShowInputBar] = useState(false);
   const [newSuggestion, setNewSuggestion] = useState("");
@@ -42,11 +59,6 @@ const BookLibrary = memo(({ classId, userRole, suggestions, onAddSuggestion, onU
   const [books, setBooks] = useState(() => {
     const cached = localStorage.getItem(`class_${classId}_books`);
     return cached ? JSON.parse(cached) : NCTB_BOOKS;
-  });
-
-  const [bookPdfs, setBookPdfs] = useState<Record<string, string>>(() => {
-    const cached = localStorage.getItem(`class_${classId}_pdfs`);
-    return cached ? JSON.parse(cached) : {};
   });
 
   const showToast = (msg: string) => {
@@ -74,22 +86,13 @@ const BookLibrary = memo(({ classId, userRole, suggestions, onAddSuggestion, onU
   };
 
   const handleBookClick = (book: any) => {
-    if (bookPdfs[book.id]) {
-      window.open(bookPdfs[book.id], "_blank");
-    } else {
-      showToast("Book coming soon!");
-    }
+    setSelectedBook(book.id);
   };
 
   const handleDeleteBook = (id: string) => {
     const updatedBooks = books.filter((b: any) => b.id !== id);
     setBooks(updatedBooks);
     localStorage.setItem(`class_${classId}_books`, JSON.stringify(updatedBooks));
-    
-    const newPdfs = { ...bookPdfs };
-    delete newPdfs[id];
-    setBookPdfs(newPdfs);
-    localStorage.setItem(`class_${classId}_pdfs`, JSON.stringify(newPdfs));
     
     setDeleteConfirmId(null);
     setManageBook(null);
@@ -105,9 +108,8 @@ const BookLibrary = memo(({ classId, userRole, suggestions, onAddSuggestion, onU
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64 = reader.result as string;
-        const newPdfs = { ...bookPdfs, [bookId]: base64 };
-        setBookPdfs(newPdfs);
-        localStorage.setItem(`class_${classId}_pdfs`, JSON.stringify(newPdfs));
+        const pdfKey = `${classId}_${bookId}`;
+        onUpdateBookPdf?.(pdfKey, base64);
         showToast("PDF uploaded successfully");
       };
       reader.readAsDataURL(file);

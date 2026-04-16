@@ -25,8 +25,10 @@ interface ClassPortalProps {
   attendance: any;
   onUpdateAttendance?: (classId: string, percentage: number) => void;
   routines?: any;
-  onUpdateRoutine?: (classId: string, day: string, period: string, subject: string) => void;
+  onUpdateRoutine?: (classId: string, headers: string[], rows: string[][]) => void;
   language: Language;
+  bookPdfs?: Record<string, string>;
+  onUpdateBookPdf?: (bookKey: string, url: string) => void;
 }
 
 export default React.memo(function ClassPortal({ 
@@ -44,7 +46,9 @@ export default React.memo(function ClassPortal({
   onUpdateAttendance,
   routines,
   onUpdateRoutine,
-  language
+  language,
+  bookPdfs,
+  onUpdateBookPdf
 }: ClassPortalProps) {
   const t = translations[language];
   const [view, setView] = useState<"list" | "library" | "result" | "attendance" | "routine" | "homework" | "suggestions" | "half_yearly_charge" | "annual_charge" | "class_notice">("list");
@@ -114,6 +118,9 @@ export default React.memo(function ClassPortal({
             onUpdateSuggestion={onUpdateSuggestion}
             onDeleteSuggestion={onDeleteSuggestion}
             onBack={() => setView("list")}
+            language={language}
+            bookPdfs={bookPdfs}
+            onUpdateBookPdf={onUpdateBookPdf}
           />
         );
       case "homework":
@@ -425,6 +432,8 @@ export default React.memo(function ClassPortal({
             userRole={userRole} 
             onBack={() => setView("list")} 
             language={language}
+            routineData={routines?.[selectedClass!]}
+            onUpdateRoutine={onUpdateRoutine}
           />
         );
       default:

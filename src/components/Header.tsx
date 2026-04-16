@@ -3,6 +3,7 @@ import { School, Bell, X, Shield, User as UserIcon, Check, Moon, Sun, Languages,
 import { UserData } from "../App";
 import { TabType } from "./Navigation";
 import { motion, AnimatePresence } from "motion/react";
+import { Link } from "react-router-dom";
 import { Language, translations } from "../lib/translations";
 
 interface HeaderProps {
@@ -59,7 +60,8 @@ export default function Header({
         {/* Top Left: Profile Pic & Info */}
         <div className="relative" ref={dropdownRef}>
           <div className="flex items-center gap-1">
-            <button 
+            <Link 
+              to="/profile"
               onClick={() => setActiveTab("Profile")}
               className="flex items-center gap-3 group pointer-events-auto"
             >
@@ -77,7 +79,7 @@ export default function Header({
                   {user.role === "Student" ? `${t.rollLabel}${user.rollId}` : user.designation}
                 </p>
               </div>
-            </button>
+            </Link>
             <button 
               onClick={(e) => {
                 e.preventDefault();
@@ -144,19 +146,17 @@ export default function Header({
                     </button>
                   )}
 
-                  {/* Switch Role (Super Admin Only) */}
-                  {isSuperAdmin && (
-                    <button 
-                      onClick={() => {
-                        setShowProfileDropdown(false);
-                        onDirectRoleSwitch();
-                      }}
-                      className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-white/20 text-emerald-900 transition-all"
-                    >
-                      <Shield className="w-4 h-4 text-emerald-600" />
-                      <span className="text-xs font-bold">Switch Role</span>
-                    </button>
-                  )}
+                  {/* Switch Role */}
+                  <button 
+                    onClick={() => {
+                      setShowProfileDropdown(false);
+                      onDirectRoleSwitch();
+                    }}
+                    className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-white/20 text-emerald-900 transition-all"
+                  >
+                    <Shield className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold">Switch Role</span>
+                  </button>
 
                   <div className="h-px bg-white/20 my-2 mx-2" />
 
@@ -177,18 +177,30 @@ export default function Header({
         {/* Top Right: Icons */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <button 
+            <Link 
+              to="/notice"
+              onClick={() => onNoticeClick()}
+              className={`p-2 rounded-xl transition-all relative ${activeTab === "Notice" ? "bg-emerald-600 text-white shadow-lg" : "hover:bg-white/20 text-emerald-900"}`}
+            >
+              <Bell className="w-5 h-5" />
+              {hasNewNotices && (
+                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-white animate-pulse" />
+              )}
+            </Link>
+            <Link 
+              to="/inbox"
               onClick={() => setActiveTab("Inbox")}
               className={`p-2 rounded-xl transition-all ${activeTab === "Inbox" ? "bg-emerald-600 text-white shadow-lg" : "hover:bg-white/20 text-emerald-900"}`}
             >
               <Mail className="w-5 h-5" />
-            </button>
-            <button 
+            </Link>
+            <Link 
+              to="/globe"
               onClick={() => setActiveTab("Globe")}
               className={`p-2 rounded-xl transition-all ${activeTab === "Globe" ? "bg-emerald-600 text-white shadow-lg" : "hover:bg-white/20 text-emerald-900"}`}
             >
               <Globe className="w-5 h-5" />
-            </button>
+            </Link>
           </div>
         </div>
       </div>

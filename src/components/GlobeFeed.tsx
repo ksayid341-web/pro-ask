@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "motion/react";
 import GlassCard from "./GlassCard";
 import { UserData } from "../App";
 import { Language, translations } from "../lib/translations";
+import { db } from "../firebase";
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 
 export interface Post {
   id: string;
@@ -25,25 +27,39 @@ interface GlobeFeedProps {
 }
 
 export default React.memo(function GlobeFeed({ user, language, onViewProfile }: GlobeFeedProps) {
-  const [posts, setPosts] = useState<Post[]>(() => {
-    const savedPosts = localStorage.getItem("globe_posts");
-    const posts: Post[] = savedPosts ? JSON.parse(savedPosts) : [];
-    const savedRatings = JSON.parse(localStorage.getItem("user_ratings_data") || "{}");
-    
-    // Merge latest ratings into posts
-    return posts.map(post => ({
-      ...post,
-      rating: savedRatings[post.userId]?.average || post.rating || 0
-    }));
-  });
+  const [posts, setPosts] = useState<Post[]>([]);
   const [showRatingMenu, setShowRatingMenu] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const t = translations[language];
 
   useEffect(() => {
-    localStorage.setItem("globe_posts", JSON.stringify(posts));
-  }, [posts]);
+    const unsubscribe = onSnapshot(collection(db, "posts"), (snapshot) => {
+      const fetchedPosts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Post[];
+      
+      // Client-side sort to handle null timestamps from serverTimestamp()
+      const sortedPosts = fetchedPosts.sort((a: any, b: any) => {
+        const timeA = a.timestamp?.toMillis?.() || Date.now();
+        const timeB = b.timestamp?.toMillis?.() || Date.now();
+        return timeB - timeA;
+      });
+      
+      const savedRatings = JSON.parse(localStorage.getItem("user_ratings_data") || "{}");
+      const mergedPosts = sortedPosts.map(post => ({
+        ...post,
+        rating: savedRatings[post.userId]?.average || post.rating || 0
+      }));
+      
+      setPosts(mergedPosts);
+    }, (error) => {
+      console.error("Error fetching globe posts:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -55,21 +71,20 @@ export default React.memo(function GlobeFeed({ user, language, onViewProfile }: 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleLike = (postId: string) => {
-    const updatedPosts = posts.map(post => {
-      if (post.id === postId) {
-        const hasLiked = post.likes.includes(user.uid);
-        return {
-          ...post,
-          likes: hasLiked 
-            ? post.likes.filter(id => id !== user.uid)
-            : [...post.likes, user.uid]
-        };
-      }
-      return post;
-    });
-    setPosts(updatedPosts);
-    localStorage.setItem("globe_posts", JSON.stringify(updatedPosts));
+  const handleLike = async (postId: string) => {
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+
+    const hasLiked = post.likes.includes(user.uid);
+    const postRef = doc(db, "posts", postId);
+
+    try {
+      await updateDoc(postRef, {
+        likes: hasLiked ? arrayRemove(user.uid) : arrayUnion(user.uid)
+      });
+    } catch (error) {
+      console.error("Error updating like:", error);
+    }
   };
 
   const handleRateStudent = (studentId: string, stars: number) => {

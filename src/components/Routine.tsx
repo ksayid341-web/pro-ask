@@ -10,18 +10,22 @@ interface RoutineProps {
   userRole: UserRole;
   onBack: () => void;
   language: Language;
+  routineData?: any;
+  onUpdateRoutine?: (classId: string, headers: string[], rows: string[][]) => void;
 }
 
-export default function Routine({ classId, userRole, onBack, language }: RoutineProps) {
+export default function Routine({ classId, userRole, onBack, language, routineData, onUpdateRoutine }: RoutineProps) {
   const t: TranslationType = translations[language];
   const storageKey = `local_routine_${classId}`;
   
   const [headers, setHeaders] = useState<string[]>(() => {
+    if (routineData?.headers) return routineData.headers;
     const cached = localStorage.getItem(`${storageKey}_headers`);
     return cached ? JSON.parse(cached) : ["Day", "09:00 - 10:00", "10:00 - 11:00", "11:00 - 12:00"];
   });
 
   const [rows, setRows] = useState<string[][]>(() => {
+    if (routineData?.rows) return routineData.rows;
     const cached = localStorage.getItem(`${storageKey}_rows`);
     return cached ? JSON.parse(cached) : [
       ["Sat", "", "", ""],
@@ -33,6 +37,11 @@ export default function Routine({ classId, userRole, onBack, language }: Routine
     ];
   });
 
+  useEffect(() => {
+    if (routineData?.headers) setHeaders(routineData.headers);
+    if (routineData?.rows) setRows(routineData.rows);
+  }, [routineData]);
+
   const [editingHeader, setEditingHeader] = useState<number | null>(null);
   const [editingCell, setEditingCell] = useState<{ r: number; c: number } | null>(null);
 
@@ -43,24 +52,34 @@ export default function Routine({ classId, userRole, onBack, language }: Routine
 
   const addColumn = () => {
     if (userRole !== "Teacher") return;
-    setHeaders([...headers, "New Period"]);
-    setRows(rows.map(row => [...row, ""]));
+    const newHeaders = [...headers, "New Period"];
+    const newRows = rows.map(row => [...row, ""]);
+    setHeaders(newHeaders);
+    setRows(newRows);
+    onUpdateRoutine?.(classId, newHeaders, newRows);
   };
 
   const addRow = () => {
     if (userRole !== "Teacher") return;
-    setRows([...rows, new Array(headers.length).fill("")]);
+    const newRows = [...rows, new Array(headers.length).fill("")];
+    setRows(newRows);
+    onUpdateRoutine?.(classId, headers, newRows);
   };
 
   const deleteColumn = (index: number) => {
     if (userRole !== "Teacher" || index === 0) return;
-    setHeaders(headers.filter((_, i) => i !== index));
-    setRows(rows.map(row => row.filter((_, i) => i !== index)));
+    const newHeaders = headers.filter((_, i) => i !== index);
+    const newRows = rows.map(row => row.filter((_, i) => i !== index));
+    setHeaders(newHeaders);
+    setRows(newRows);
+    onUpdateRoutine?.(classId, newHeaders, newRows);
   };
 
   const deleteRow = (index: number) => {
     if (userRole !== "Teacher") return;
-    setRows(rows.filter((_, i) => i !== index));
+    const newRows = rows.filter((_, i) => i !== index);
+    setRows(newRows);
+    onUpdateRoutine?.(classId, headers, newRows);
   };
 
   const updateHeader = (index: number, value: string) => {
@@ -68,6 +87,7 @@ export default function Routine({ classId, userRole, onBack, language }: Routine
     const newHeaders = [...headers];
     newHeaders[index] = value;
     setHeaders(newHeaders);
+    onUpdateRoutine?.(classId, newHeaders, rows);
   };
 
   const updateCell = (r: number, c: number, value: string) => {
@@ -75,6 +95,7 @@ export default function Routine({ classId, userRole, onBack, language }: Routine
     const newRows = [...rows];
     newRows[r][c] = value;
     setRows(newRows);
+    onUpdateRoutine?.(classId, headers, newRows);
   };
 
   return (

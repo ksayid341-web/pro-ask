@@ -5,6 +5,9 @@ import GlassCard from "./GlassCard";
 import { UserData } from "../App";
 import { Language, translations } from "../lib/translations";
 import { compressImage } from "../lib/imageUtils";
+import { db } from "../firebase";
+import { collection, addDoc, serverTimestamp, deleteDoc, doc, onSnapshot, query, where, orderBy } from "firebase/firestore";
+import { uploadToImgBB } from "../lib/imgbb";
 
 interface ProfileProps {
   user: UserData; // The logged in user
@@ -12,15 +15,20 @@ interface ProfileProps {
   onClose?: () => void;
   language: Language;
   isPage?: boolean;
+  onUpdateProfilePic?: (uid: string, photoURL: string) => void;
 }
 
-export default React.memo(function Profile({ user, profileUser, onClose, language, isPage = false }: ProfileProps) {
+export default React.memo(function Profile({ user, profileUser, onClose, language, isPage = false, onUpdateProfilePic }: ProfileProps) {
   const [isUploading, setIsUploading] = useState(false);
+  const [isUploadingProfilePic, setIsUploadingProfilePic] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [rating, setRating] = useState<number>(0);
   const [ratingCount, setRatingCount] = useState<number>(0);
   const [myPosts, setMyPosts] = useState<any[]>([]);
   const t = translations[language];
+
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const savedRatings = JSON.parse(localStorage.getItem("user_ratings_data") || "{}");
@@ -28,17 +36,51 @@ export default React.memo(function Profile({ user, profileUser, onClose, languag
     setRating(userData.average);
     setRatingCount(userData.count);
 
-    const allPosts = JSON.parse(localStorage.getItem("globe_posts") || "[]");
-    const userPosts = allPosts.filter((p: any) => p.userId === profileUser.uid);
-    
-    // Merge latest rating
-    const updatedUserPosts = userPosts.map((p: any) => ({
-      ...p,
-      rating: userData.average || p.rating || 0
-    }));
+    // Listen to posts from Firestore
+    const q = query(
+      collection(db, "posts"),
+      where("userId", "==", profileUser.uid),
+      orderBy("timestamp", "desc")
+    );
 
-    setMyPosts(updatedUserPosts.sort((a: any, b: any) => b.timestamp - a.timestamp));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const posts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setMyPosts(posts);
+    }, (error) => {
+      console.error("Error fetching posts:", error);
+    });
+
+    return () => unsubscribe();
   }, [profileUser.uid]);
+
+  const handleProfilePicChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onUpdateProfilePic) return;
+
+    console.log("Starting profile picture upload for user:", user.uid);
+    setIsUploadingProfilePic(true);
+    setUploadError(null);
+    try {
+      const compressed = await compressImage(file);
+      
+      // Upload to ImgBB
+      console.log("Calling ImgBB upload...");
+      const downloadURL = await uploadToImgBB(compressed);
+      console.log("ImgBB upload successful:", downloadURL);
+      
+      console.log("Updating Firestore document at users/", user.uid);
+      await onUpdateProfilePic(user.uid, downloadURL);
+      console.log("Firestore update call completed");
+    } catch (error: any) {
+      console.error("Profile picture update failed:", error);
+      setUploadError(error.message || "Failed to update profile picture. Please try again.");
+    } finally {
+      setIsUploadingProfilePic(false);
+    }
+  };
 
   const handlePostUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -47,24 +89,23 @@ export default React.memo(function Profile({ user, profileUser, onClose, languag
     setIsUploading(true);
     try {
       const compressed = await compressImage(file);
-      const posts = JSON.parse(localStorage.getItem("globe_posts") || "[]");
       
-      const newPost = {
-        id: Math.random().toString(36).substr(2, 9),
+      // 1. Upload to ImgBB
+      const downloadURL = await uploadToImgBB(compressed);
+
+      // 2. Save to Firestore
+      await addDoc(collection(db, "posts"), {
         userId: user.uid,
         userName: user.name,
         userPhoto: user.photoURL,
         userRole: user.role,
-        imageUrl: compressed,
+        imageUrl: downloadURL,
         caption: caption,
         likes: [],
-        timestamp: Date.now(),
+        timestamp: serverTimestamp(),
         rating: JSON.parse(localStorage.getItem("user_ratings_data") || "{}")[user.uid]?.average || 0
-      };
+      });
 
-      const updatedPosts = [...posts, newPost];
-      localStorage.setItem("globe_posts", JSON.stringify(updatedPosts));
-      setMyPosts(updatedPosts.filter((p: any) => p.userId === profileUser.uid).sort((a: any, b: any) => b.timestamp - a.timestamp));
       setCaption("");
     } catch (error) {
       console.error("Upload failed:", error);
@@ -114,13 +155,12 @@ export default React.memo(function Profile({ user, profileUser, onClose, languag
     localStorage.setItem("globe_posts", JSON.stringify(updatedPosts));
   };
 
-  const handleDeletePost = (postId: string) => {
-    const allPosts = JSON.parse(localStorage.getItem("globe_posts") || "[]");
-    const updatedPosts = allPosts.filter((p: any) => p.id !== postId);
-    localStorage.setItem("globe_posts", JSON.stringify(updatedPosts));
-    
-    // Update local state
-    setMyPosts(updatedPosts.filter((p: any) => p.userId === profileUser.uid).sort((a: any, b: any) => b.timestamp - a.timestamp));
+  const handleDeletePost = async (postId: string) => {
+    try {
+      await deleteDoc(doc(db, "posts", postId));
+    } catch (error) {
+      console.error("Error deleting post:", error);
+    }
   };
 
   const isOwnProfile = user.uid === profileUser.uid;
@@ -146,11 +186,38 @@ export default React.memo(function Profile({ user, profileUser, onClose, languag
               referrerPolicy="no-referrer"
             />
             {isOwnProfile && (
-              <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-emerald-600 border-2 border-white flex items-center justify-center shadow-lg">
-                <Camera className="w-4 h-4 text-white" />
-              </div>
+              <>
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingProfilePic}
+                  className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-emerald-600 border-2 border-white flex items-center justify-center shadow-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                >
+                  {isUploadingProfilePic ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Camera className="w-4 h-4 text-white" />
+                  )}
+                </button>
+                <input 
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleProfilePicChange}
+                  accept="image/*"
+                  className="hidden"
+                />
+              </>
             )}
           </div>
+          
+          {uploadError && (
+            <motion.p 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-xs font-bold text-red-500 bg-red-50 px-3 py-1 rounded-lg mt-2"
+            >
+              {uploadError}
+            </motion.p>
+          )}
           
           <div className="space-y-1">
             <div className="flex items-center justify-center gap-2">
