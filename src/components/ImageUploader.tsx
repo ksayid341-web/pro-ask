@@ -28,7 +28,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         const base64 = reader.result as string;
         // Client-side compression to ensure it fits in Firestore (1MB limit)
         const compressed = await compressImage(base64);
-        onUpload(compressed);
+        await onUpload(compressed);
       };
       reader.readAsDataURL(file);
     } catch (error) {

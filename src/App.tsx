@@ -13,7 +13,7 @@ import LoginView, { UserRole } from "./components/LoginView";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { auth, db } from "./firebase";
 import { signInAnonymously } from "firebase/auth";
-import { doc, setDoc, updateDoc, addDoc, onSnapshot, collection, deleteDoc, query, orderBy, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, updateDoc, addDoc, onSnapshot, collection, deleteDoc, query, orderBy, serverTimestamp, arrayUnion, arrayRemove } from "firebase/firestore";
 import { handleFirestoreError, OperationType } from "./lib/firestoreUtils";
 import { motion, AnimatePresence } from "motion/react";
 import { Bell, Image as ImageIcon, Info, GraduationCap, Users, Calendar, LogOut, Plus, Edit2, Phone, Mail, X, Trash2, Upload, Check, School, ChevronDown, LayoutGrid, Settings, Shield, Lock as LockIcon } from "lucide-react";
@@ -273,24 +273,27 @@ export default function App() {
 
   // Sync Gallery and Settings
   useEffect(() => {
-    const galleryPath = "gallery";
-    const unsubGallery = onSnapshot(collection(db, galleryPath), (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data() 
-      }) as GalleryImage);
-      
-      // Client-side sort to handle null timestamps from serverTimestamp()
-      const sortedItems = items.sort((a: any, b: any) => {
-        const timeA = a.timestamp?.toMillis?.() || (typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : Date.now());
-        const timeB = b.timestamp?.toMillis?.() || (typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : Date.now());
-        return timeB - timeA;
-      });
-      
-      setGalleryImages(sortedItems);
-      localStorage.setItem('app_gallery', JSON.stringify(sortedItems));
+    const galleryDocRef = doc(db, "settings", "gallery");
+    const unsubGallery = onSnapshot(galleryDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const items = (data.images || []) as GalleryImage[];
+        
+        // Client-side sort to handle null timestamps from serverTimestamp()
+        const sortedItems = [...items].sort((a: any, b: any) => {
+          const timeA = a.timestamp?.toMillis?.() || (typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : Date.now());
+          const timeB = b.timestamp?.toMillis?.() || (typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : Date.now());
+          return timeB - timeA;
+        });
+        
+        setGalleryImages(sortedItems);
+        localStorage.setItem('app_gallery', JSON.stringify(sortedItems));
+      } else {
+        setGalleryImages([]);
+        localStorage.setItem('app_gallery', JSON.stringify([]));
+      }
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, galleryPath);
+      handleFirestoreError(error, OperationType.GET, "settings/gallery");
     });
 
     const settingsPath = "settings/global";
@@ -788,31 +791,21 @@ export default function App() {
 
     setIsUploading(true);
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64 = event.target?.result as string;
-        const path = "settings/global";
-        try {
-          // Client-side compression
-          const compressed = await compressImage(base64);
-          
-          // Upload to ImgBB
-          const downloadURL = await uploadToImgBB(compressed);
-          
-          setHeroBannerUrl(downloadURL);
-          localStorage.setItem('app_banner', downloadURL);
-          await setDoc(doc(db, "settings", "global"), { heroBannerUrl: downloadURL }, { merge: true });
-          announceSuccess("Hero banner updated successfully");
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, path);
-        } finally {
-          setIsUploading(false);
-        }
-      };
-      reader.readAsDataURL(file);
+      const compressed = await compressImage(file);
+      
+      // Upload to ImgBB
+      const downloadURL = await uploadToImgBB(compressed);
+      
+      setHeroBannerUrl(downloadURL);
+      localStorage.setItem('app_banner', downloadURL);
+      await setDoc(doc(db, "settings", "global"), { heroBannerUrl: downloadURL }, { merge: true });
+      announceSuccess("Hero banner updated successfully");
     } catch (error) {
-      console.error("Banner processing failed:", error);
+      console.error("Banner update failed:", error);
+      announceError("Failed to update banner");
+    } finally {
       setIsUploading(false);
+      e.target.value = "";
     }
   };
 
@@ -857,13 +850,17 @@ export default function App() {
 
       const id = Math.random().toString(36).substr(2, 9);
       const newImage: any = {
+        id,
         url: downloadURL,
         caption: "New Gallery Photo",
         uploadedBy: user.name,
         timestamp: serverTimestamp()
       };
       
-      await setDoc(doc(db, "gallery", id), newImage);
+      await setDoc(doc(db, "settings", "gallery"), {
+        images: arrayUnion(newImage)
+      }, { merge: true });
+      
       announceSuccess("The gallery has been updated");
     } catch (error) {
       console.error("Error uploading image:", error);
@@ -876,11 +873,17 @@ export default function App() {
 
   const handleDeleteGalleryImage = async (id: string) => {
     if (!user || user.role !== "Teacher") return;
-    const path = `gallery/${id}`;
     try {
-      await deleteDoc(doc(db, "gallery", id));
+      const imageToDelete = galleryImages.find(img => img.id === id);
+      if (!imageToDelete) return;
+
+      await setDoc(doc(db, "settings", "gallery"), {
+        images: arrayRemove(imageToDelete)
+      }, { merge: true });
+      
+      announceSuccess("Image removed from gallery");
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      handleFirestoreError(error, OperationType.DELETE, "settings/gallery");
     }
   };
 
@@ -1246,12 +1249,17 @@ export default function App() {
                                   setIsUploading(true);
                                   const downloadURL = await uploadToImgBB(base64);
                                   const newImage: any = {
+                                    id,
                                     url: downloadURL,
                                     caption: "New Gallery Photo",
                                     uploadedBy: user.name,
                                     timestamp: serverTimestamp()
                                   };
-                                  await setDoc(doc(db, "gallery", id), newImage);
+                                  
+                                  await setDoc(doc(db, "settings", "gallery"), {
+                                    images: arrayUnion(newImage)
+                                  }, { merge: true });
+                                  
                                   announceSuccess("The gallery has been updated");
                                 } catch (error) {
                                   console.error("Gallery upload failed:", error);
