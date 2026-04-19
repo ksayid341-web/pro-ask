@@ -32,7 +32,7 @@ export default React.memo(function Profile({ user, profileUser, onClose, languag
 
   useEffect(() => {
 const q = query(
-      collection(db, "posts"),
+      collection(db, "inventory"),
       orderBy("timestamp", "desc")
     );
 
