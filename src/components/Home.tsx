@@ -3,7 +3,17 @@ import { motion, AnimatePresence } from "motion/react";
 import { UserData, NoticeItem } from "../App";
 import { Language, TranslationType, translations } from "../lib/translations";
 import GlassCard from "./GlassCard";
-import { School, Users, Star, Calendar, Edit2, LayoutGrid, ChevronDown, Trash2, Clock, BarChart3, Bell, Camera } from "lucide-react";
+import { School, Users, Star, Calendar, Edit2, LayoutGrid, ChevronDown, Trash2, Clock, BarChart3, Bell, Camera, Heart } from "lucide-react";
+import { db } from "../firebase";
+import { collection, onSnapshot, query, orderBy, limit } from "firebase/firestore";
+
+interface Post {
+  id: string;
+  imageUrl: string;
+  userName: string;
+  caption: string;
+  timestamp: any;
+}
 
 interface HomeProps {
   user: UserData;
@@ -62,6 +72,36 @@ export default React.memo(function Home({
 }: HomeProps) {
   const t: TranslationType = translations[language];
   const [counts, setCounts] = useState({ students: 0, teachers: 0 });
+  const [recentPosts, setRecentPosts] = useState<Post[]>([]);
+
+  useEffect(() => {
+    // Real-time listener for the community feed on Home
+    const q = query(
+      collection(db, "posts"),
+      orderBy("timestamp", "desc"),
+      limit(10)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const posts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Post[];
+      
+      // Sort handling for local vs server timestamps
+      const sortedPosts = posts.sort((a, b) => {
+        const timeA = a.timestamp?.toMillis?.() || Date.now();
+        const timeB = b.timestamp?.toMillis?.() || Date.now();
+        return timeB - timeA;
+      });
+
+      setRecentPosts(sortedPosts);
+    }, (error) => {
+      console.error("Error fetching home posts:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const savedUsers = JSON.parse(localStorage.getItem("app_users") || "[]");
@@ -344,6 +384,51 @@ export default React.memo(function Home({
           )}
         </div>
       </GlassCard>
+
+      {/* School Feed Title */}
+      <div className="flex items-center justify-between px-2 pt-4">
+        <h3 className="text-xl font-black text-emerald-900 uppercase tracking-tight flex items-center gap-2">
+          <Camera className="w-5 h-5 text-emerald-600" />
+          Community Feed
+        </h3>
+        <button 
+          onClick={() => setActiveTab("Globe")}
+          className="text-xs font-bold text-emerald-600 uppercase tracking-wider hover:underline"
+        >
+          View All
+        </button>
+      </div>
+
+      {/* Community Feed Horizontal Scroll or Grid */}
+      <div className="grid grid-cols-2 gap-4">
+        {recentPosts.length > 0 ? (
+          recentPosts.map((post) => (
+            <motion.div
+              key={post.id}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="group relative aspect-square rounded-[32px] overflow-hidden glass border-white/40 shadow-xl"
+            >
+              <img 
+                src={post.imageUrl} 
+                alt="Feed" 
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                <div className="space-y-0.5">
+                  <p className="text-white text-[10px] font-black uppercase tracking-widest">{post.userName}</p>
+                  <p className="text-white/80 text-[8px] line-clamp-1">{post.caption}</p>
+                </div>
+              </div>
+            </motion.div>
+          ))
+        ) : (
+          [1, 2, 3, 4].map(i => (
+            <div key={i} className="aspect-square rounded-[32px] glass animate-pulse" />
+          ))
+        )}
+      </div>
 
       {/* Quick Stats / Info */}
       <div className="grid grid-cols-2 gap-4">

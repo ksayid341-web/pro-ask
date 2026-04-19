@@ -48,7 +48,15 @@ export default React.memo(function Profile({ user, profileUser, onClose, languag
         id: doc.id,
         ...doc.data()
       }));
-      setMyPosts(posts);
+
+      // Robust sort for local/server latency
+      const sortedPosts = posts.sort((a: any, b: any) => {
+        const timeA = a.timestamp?.toMillis?.() || (typeof a.timestamp === 'number' ? a.timestamp : Date.now());
+        const timeB = b.timestamp?.toMillis?.() || (typeof b.timestamp === 'number' ? b.timestamp : Date.now());
+        return timeB - timeA;
+      });
+
+      setMyPosts(sortedPosts);
     }, (error) => {
       console.error("Error fetching posts:", error);
     });

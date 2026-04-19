@@ -42,8 +42,8 @@ export default React.memo(function GlobeFeed({ user, language, onViewProfile }: 
       
       // Client-side sort to handle null timestamps from serverTimestamp()
       const sortedPosts = fetchedPosts.sort((a: any, b: any) => {
-        const timeA = a.timestamp?.toMillis?.() || Date.now();
-        const timeB = b.timestamp?.toMillis?.() || Date.now();
+        const timeA = a.timestamp?.toMillis?.() || (typeof a.timestamp === 'number' ? a.timestamp : Date.now());
+        const timeB = b.timestamp?.toMillis?.() || (typeof b.timestamp === 'number' ? b.timestamp : Date.now());
         return timeB - timeA;
       });
       
@@ -159,7 +159,7 @@ export default React.memo(function GlobeFeed({ user, language, onViewProfile }: 
         </GlassCard>
       ) : (
         <div className="space-y-6">
-          {posts.sort((a, b) => b.timestamp - a.timestamp).map((post) => (
+          {posts.map((post) => (
             <GlassCard key={post.id} className="p-0 overflow-hidden border-white/40 shadow-xl">
               {/* Post Header */}
               <div className="p-4 flex items-center justify-between">
