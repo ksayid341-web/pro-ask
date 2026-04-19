@@ -31,39 +31,24 @@ export default React.memo(function Profile({ user, profileUser, onClose, languag
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const savedRatings = JSON.parse(localStorage.getItem("user_ratings_data") || "{}");
-    const userData = savedRatings[profileUser.uid] || { average: 0, count: 0 };
-    setRating(userData.average);
-    setRatingCount(userData.count);
-
-    // Listen to posts from Firestore
-    const q = query(
+const q = query(
       collection(db, "posts"),
       where("userId", "==", profileUser.uid),
       orderBy("timestamp", "desc")
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const posts = snapshot.docs.map(doc => ({
+      const postsData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-
-      // Robust sort for local/server latency
-      const sortedPosts = posts.sort((a: any, b: any) => {
-        const timeA = a.timestamp?.toMillis?.() || (typeof a.timestamp === 'number' ? a.timestamp : Date.now());
-        const timeB = b.timestamp?.toMillis?.() || (typeof b.timestamp === 'number' ? b.timestamp : Date.now());
-        return timeB - timeA;
-      });
-
-      setMyPosts(sortedPosts);
+      setMyPosts(postsData);
     }, (error) => {
       console.error("Error fetching posts:", error);
     });
 
     return () => unsubscribe();
   }, [profileUser.uid]);
-
   const handleProfilePicChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !onUpdateProfilePic) return;
